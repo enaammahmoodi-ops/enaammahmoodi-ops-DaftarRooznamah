@@ -9,6 +9,7 @@ import android.telephony.SmsMessage;
 import android.widget.Toast;
 
 import org.json.JSONArray;
+import org.json.JSONObject;
 
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
@@ -16,6 +17,8 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 import java.net.URLEncoder;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
 import java.util.List;
 
 public class SmsReceiver extends BroadcastReceiver {
@@ -24,8 +27,18 @@ public class SmsReceiver extends BroadcastReceiver {
             "https://script.google.com/macros/s/AKfycbyLjGFEBZuoF2HxMYHvbJaTEjM8NXf4_6mEUGd4iKE0Fp1xZwIwl3XfY5EhepGlKj72/exec?action=sms&msg=";
 
     private static final String PREF_NAME = "offline_sms_queue";
-    private static final String KEY_QUEUE = "pending_messages";
+    private static final String KEY_QUEUE = "pending_messages_v2";
     private static boolean syncRunning = false;
+
+    static class SmsItem {
+        long time;
+        String msg;
+
+        SmsItem(long time, String msg) {
+            this.time = time;
+            this.msg = msg;
+        }
+    }
 
     @Override
     public void onReceive(Context context, Intent intent) {
@@ -42,24 +55,29 @@ public class SmsReceiver extends BroadcastReceiver {
         if (pdus == null) return;
 
         StringBuilder fullMessage = new StringBuilder();
+        long smsTime = System.currentTimeMillis();
 
         for (Object pdu : pdus) {
             SmsMessage sms = SmsMessage.createFromPdu((byte[]) pdu, format);
-            if (sms != null) fullMessage.append(sms.getMessageBody());
+            if (sms != null) {
+                fullMessage.append(sms.getMessageBody());
+                if (sms.getTimestampMillis() > 0) {
+                    smsTime = sms.getTimestampMillis();
+                }
+            }
         }
 
         String msg = fullMessage.toString();
         if (!isBankSms(msg)) return;
 
-        Toast.makeText(context, "پیامک بانکی دریافت شد", Toast.LENGTH_LONG).show();
+        Toast.makeText(context, "پیامک بانکی ذخیره شد", Toast.LENGTH_LONG).show();
 
         final PendingResult pendingResult = goAsync();
 
+        final long finalSmsTime = smsTime;
         new Thread(() -> {
             try {
-                // همه پیامک‌ها اول داخل صف ذخیره می‌شوند
-                // بعد صف به ترتیب ارسال می‌شود
-                savePendingSms(context, msg);
+                savePendingSms(context, msg, finalSmsTime);
                 retryPendingSms(context);
             } finally {
                 pendingResult.finish();
@@ -116,14 +134,12 @@ public class SmsReceiver extends BroadcastReceiver {
         }
     }
 
-    private static synchronized void savePendingSms(Context context, String msg) {
-        List<String> queue = getQueue(context);
+    private static synchronized void savePendingSms(Context context, String msg, long time) {
+        if (msg == null || msg.trim().length() == 0) return;
 
-        // پیام‌های مشابه هم باید ثبت شوند، چون ممکن است مبلغ‌ها یا زمان‌ها نزدیک باشند
-        if (msg != null && msg.trim().length() > 0) {
-            queue.add(msg);
-            saveQueue(context, queue);
-        }
+        List<SmsItem> queue = getQueue(context);
+        queue.add(new SmsItem(time, msg));
+        saveQueue(context, queue);
     }
 
     public static void retryPendingSms(Context context) {
@@ -133,22 +149,28 @@ public class SmsReceiver extends BroadcastReceiver {
 
         new Thread(() -> {
             try {
-                List<String> queue = getQueue(context);
+                List<SmsItem> queue = getQueue(context);
 
                 if (queue.isEmpty()) return;
 
-                List<String> failed = new ArrayList<>();
+                Collections.sort(queue, new Comparator<SmsItem>() {
+                    @Override
+                    public int compare(SmsItem a, SmsItem b) {
+                        return Long.compare(a.time, b.time);
+                    }
+                });
 
-                // ارسال به ترتیب دریافت پیامک‌ها
-                for (String msg : queue) {
-                    boolean sent = sendNow(msg);
+                List<SmsItem> remaining = new ArrayList<>();
+
+                for (SmsItem item : queue) {
+                    boolean sent = sendNow(item.msg);
 
                     if (!sent) {
-                        failed.add(msg);
+                        remaining.add(item);
                     }
                 }
 
-                saveQueue(context, failed);
+                saveQueue(context, remaining);
 
             } finally {
                 syncRunning = false;
@@ -156,8 +178,8 @@ public class SmsReceiver extends BroadcastReceiver {
         }).start();
     }
 
-    private static List<String> getQueue(Context context) {
-        List<String> list = new ArrayList<>();
+    private static List<SmsItem> getQueue(Context context) {
+        List<SmsItem> list = new ArrayList<>();
 
         try {
             SharedPreferences prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE);
@@ -166,9 +188,14 @@ public class SmsReceiver extends BroadcastReceiver {
             JSONArray arr = new JSONArray(json);
 
             for (int i = 0; i < arr.length(); i++) {
-                String item = arr.optString(i, "");
-                if (item != null && item.trim().length() > 0) {
-                    list.add(item);
+                JSONObject obj = arr.optJSONObject(i);
+                if (obj == null) continue;
+
+                String msg = obj.optString("msg", "");
+                long time = obj.optLong("time", System.currentTimeMillis());
+
+                if (msg != null && msg.trim().length() > 0) {
+                    list.add(new SmsItem(time, msg));
                 }
             }
 
@@ -177,13 +204,16 @@ public class SmsReceiver extends BroadcastReceiver {
         return list;
     }
 
-    private static void saveQueue(Context context, List<String> queue) {
+    private static void saveQueue(Context context, List<SmsItem> queue) {
         try {
             JSONArray arr = new JSONArray();
 
-            for (String msg : queue) {
-                if (msg != null && msg.trim().length() > 0) {
-                    arr.put(msg);
+            for (SmsItem item : queue) {
+                if (item != null && item.msg != null && item.msg.trim().length() > 0) {
+                    JSONObject obj = new JSONObject();
+                    obj.put("time", item.time);
+                    obj.put("msg", item.msg);
+                    arr.put(obj);
                 }
             }
 
