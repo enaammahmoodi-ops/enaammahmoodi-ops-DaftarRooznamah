@@ -7,7 +7,6 @@ import android.content.Intent;
 public class NetworkReceiver extends BroadcastReceiver {
     @Override
     public void onReceive(Context context, Intent intent) {
-        Intent smsIntent = new Intent(context, SmsReceiver.class);
-        context.sendBroadcast(smsIntent);
+        SmsReceiver.retryPendingSms(context);
     }
 }
