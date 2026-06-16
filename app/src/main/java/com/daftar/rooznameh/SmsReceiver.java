@@ -68,6 +68,7 @@ public class SmsReceiver extends BroadcastReceiver {
         }
 
         String msg = fullMessage.toString();
+
         if (!isBankSms(msg)) return;
 
         Toast.makeText(context, "پیامک بانکی ذخیره شد", Toast.LENGTH_LONG).show();
@@ -88,14 +89,61 @@ public class SmsReceiver extends BroadcastReceiver {
     private boolean isBankSms(String msg) {
         if (msg == null) return false;
 
-        return msg.contains("حساب") &&
-                (msg.contains("29002") ||
-                 msg.contains("33002") ||
-                 msg.contains("41002") ||
-                 msg.contains("84009") ||
-                 msg.contains("73004") ||
-                 msg.contains("38006") ||
-                 msg.contains("04004"));
+        String text = normalize(msg);
+
+        boolean hasBalance = text.contains("مانده");
+
+        boolean hasAccountOrCard =
+                text.contains("حساب") ||
+                text.contains("کارت");
+
+        boolean hasTime =
+                text.matches("(?s).*\\d{2}:\\d{2}.*");
+
+        boolean hasDate =
+                text.matches("(?s).*\\d{4}/\\d{2}/\\d{2}.*") ||
+                text.matches("(?s).*\\d{4}\\s*[-–]\\s*\\d{2}:\\d{2}.*");
+
+        boolean hasOperation =
+                text.contains("خرید") ||
+                text.contains("انتقال") ||
+                text.contains("واریز") ||
+                text.contains("برداشت") ||
+                text.contains("پایا") ||
+                text.contains("پل") ||
+                text.contains("ساتنا") ||
+                text.contains("حواله") ||
+                text.contains("چک") ||
+                text.contains("پایانه فروش");
+
+        return hasBalance && hasAccountOrCard && hasTime && (hasDate || hasOperation);
+    }
+
+    private static String normalize(String msg) {
+        return String.valueOf(msg)
+                .replace("ي", "ی")
+                .replace("ك", "ک")
+                .replace("۰", "0")
+                .replace("۱", "1")
+                .replace("۲", "2")
+                .replace("۳", "3")
+                .replace("۴", "4")
+                .replace("۵", "5")
+                .replace("۶", "6")
+                .replace("۷", "7")
+                .replace("۸", "8")
+                .replace("۹", "9")
+                .replace("٠", "0")
+                .replace("١", "1")
+                .replace("٢", "2")
+                .replace("٣", "3")
+                .replace("٤", "4")
+                .replace("٥", "5")
+                .replace("٦", "6")
+                .replace("٧", "7")
+                .replace("٨", "8")
+                .replace("٩", "9")
+                .trim();
     }
 
     private static boolean sendNow(String msg) {
