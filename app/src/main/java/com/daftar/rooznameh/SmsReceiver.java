@@ -28,7 +28,6 @@ public class SmsReceiver extends BroadcastReceiver {
 
     private static final String PREF_NAME = "offline_sms_queue";
     private static final String KEY_QUEUE = "pending_messages_v3";
-    private static final String KEY_SENT = "sent_messages_v3";
 
     private static boolean syncRunning = false;
 
@@ -73,11 +72,6 @@ public class SmsReceiver extends BroadcastReceiver {
 
         if (!isBankSms(msg)) return;
 
-        if (isAlreadyQueuedOrSent(context, msg)) {
-            retryPendingSms(context);
-            return;
-        }
-
         Toast.makeText(context, "پیامک بانکی ذخیره شد", Toast.LENGTH_LONG).show();
 
         final PendingResult pendingResult = goAsync();
@@ -107,10 +101,6 @@ public class SmsReceiver extends BroadcastReceiver {
         boolean hasTime =
                 text.matches("(?s).*\\d{1,2}:\\d{2}.*");
 
-        boolean hasDate =
-                text.matches("(?s).*\\d{4}/\\d{1,2}/\\d{1,2}.*") ||
-                text.matches("(?s).*\\d{4}\\s*[-–]\\s*\\d{1,2}:\\d{2}.*");
-
         boolean hasOperation =
                 text.contains("خرید") ||
                 text.contains("انتقال") ||
@@ -123,7 +113,7 @@ public class SmsReceiver extends BroadcastReceiver {
                 text.contains("چک") ||
                 text.contains("پایانه فروش");
 
-        return hasBalance && hasAccountOrCard && hasTime && (hasDate || hasOperation);
+        return hasBalance && hasAccountOrCard && hasTime && hasOperation;
     }
 
     private static String normalize(String msg) {
@@ -195,9 +185,15 @@ public class SmsReceiver extends BroadcastReceiver {
     private static synchronized void savePendingSms(Context context, String msg, long time) {
         if (msg == null || msg.trim().length() == 0) return;
 
-        if (isAlreadyQueuedOrSent(context, msg)) return;
-
         List<SmsItem> queue = getQueue(context);
+        String key = messageKey(msg);
+
+        for (SmsItem item : queue) {
+            if (item != null && item.msg != null && messageKey(item.msg).equals(key)) {
+                return;
+            }
+        }
+
         queue.add(new SmsItem(time, msg));
         saveQueue(context, queue);
     }
@@ -221,21 +217,20 @@ public class SmsReceiver extends BroadcastReceiver {
 
                 List<SmsItem> remaining = new ArrayList<>();
 
-                for (SmsItem item : queue) {
-                    if (item == null || item.msg == null || item.msg.trim().length() == 0) {
-                        continue;
-                    }
+                for (int i = 0; i < queue.size(); i++) {
+                    SmsItem item = queue.get(i);
 
-                    if (isSent(context, item.msg)) {
+                    if (item == null || item.msg == null || item.msg.trim().length() == 0) {
                         continue;
                     }
 
                     boolean sent = sendNow(item.msg);
 
-                    if (sent) {
-                        markSent(context, item.msg);
-                    } else {
-                        remaining.add(item);
+                    if (!sent) {
+                        for (int j = i; j < queue.size(); j++) {
+                            remaining.add(queue.get(j));
+                        }
+                        break;
                     }
                 }
 
@@ -245,23 +240,6 @@ public class SmsReceiver extends BroadcastReceiver {
                 syncRunning = false;
             }
         }).start();
-    }
-
-    private static boolean isAlreadyQueuedOrSent(Context context, String msg) {
-        if (isSent(context, msg)) return true;
-
-        String key = messageKey(msg);
-        List<SmsItem> queue = getQueue(context);
-
-        for (SmsItem item : queue) {
-            if (item != null && item.msg != null) {
-                if (messageKey(item.msg).equals(key)) {
-                    return true;
-                }
-            }
-        }
-
-        return false;
     }
 
     private static List<SmsItem> getQueue(Context context) {
@@ -281,8 +259,8 @@ public class SmsReceiver extends BroadcastReceiver {
                 long time = obj.optLong("time", System.currentTimeMillis());
 
                 if (msg != null && msg.trim().length() > 0) {
-                    boolean exists = false;
                     String key = messageKey(msg);
+                    boolean exists = false;
 
                     for (SmsItem old : list) {
                         if (old != null && old.msg != null && messageKey(old.msg).equals(key)) {
@@ -323,54 +301,6 @@ public class SmsReceiver extends BroadcastReceiver {
 
             SharedPreferences prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE);
             prefs.edit().putString(KEY_QUEUE, arr.toString()).apply();
-
-        } catch (Exception ignored) {}
-    }
-
-    private static boolean isSent(Context context, String msg) {
-        try {
-            SharedPreferences prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE);
-            String json = prefs.getString(KEY_SENT, "[]");
-            JSONArray arr = new JSONArray(json);
-
-            String key = messageKey(msg);
-
-            for (int i = 0; i < arr.length(); i++) {
-                if (key.equals(arr.optString(i, ""))) {
-                    return true;
-                }
-            }
-
-        } catch (Exception ignored) {}
-
-        return false;
-    }
-
-    private static void markSent(Context context, String msg) {
-        try {
-            SharedPreferences prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE);
-            String json = prefs.getString(KEY_SENT, "[]");
-            JSONArray arr = new JSONArray(json);
-
-            String key = messageKey(msg);
-
-            for (int i = 0; i < arr.length(); i++) {
-                if (key.equals(arr.optString(i, ""))) {
-                    return;
-                }
-            }
-
-            JSONArray newArr = new JSONArray();
-            newArr.put(key);
-
-            int max = 300;
-            int start = Math.max(0, arr.length() - max + 1);
-
-            for (int i = start; i < arr.length(); i++) {
-                newArr.put(arr.optString(i, ""));
-            }
-
-            prefs.edit().putString(KEY_SENT, newArr.toString()).apply();
 
         } catch (Exception ignored) {}
     }
