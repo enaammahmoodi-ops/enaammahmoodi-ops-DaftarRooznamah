@@ -102,19 +102,7 @@ public class SmsReceiver extends BroadcastReceiver {
         boolean hasTime =
                 text.matches("(?s).*\\d{1,2}:\\d{2}.*");
 
-        boolean hasOperation =
-                text.contains("خرید") ||
-                text.contains("انتقال") ||
-                text.contains("واریز") ||
-                text.contains("برداشت") ||
-                text.contains("پایا") ||
-                text.contains("پل") ||
-                text.contains("ساتنا") ||
-                text.contains("حواله") ||
-                text.contains("چک") ||
-                text.contains("پایانه فروش");
-
-        return hasBalance && hasAccountOrCard && hasTime && hasOperation;
+        return hasBalance && hasAccountOrCard && hasTime;
     }
 
     private static String normalize(String msg) {
