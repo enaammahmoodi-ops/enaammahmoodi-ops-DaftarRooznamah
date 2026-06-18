@@ -9,19 +9,29 @@ import android.os.Handler;
 import android.os.Looper;
 
 public class NetworkReceiver extends BroadcastReceiver {
+
     @Override
     public void onReceive(Context context, Intent intent) {
-        if (isOnline(context)) {
-            new Handler(Looper.getMainLooper()).postDelayed(() -> {
-                SmsReceiver.retryPendingSms(context);
-            }, 3000);
-        }
+        runSync(context, 1000);
+        runSync(context, 5000);
+        runSync(context, 15000);
+        runSync(context, 30000);
+    }
+
+    private void runSync(Context context, long delay) {
+        new Handler(Looper.getMainLooper()).postDelayed(() -> {
+            if (isOnline(context)) {
+                SmsReceiver.retryPendingSms(context.getApplicationContext());
+            }
+        }, delay);
     }
 
     private boolean isOnline(Context context) {
         try {
             ConnectivityManager cm =
                     (ConnectivityManager) context.getSystemService(Context.CONNECTIVITY_SERVICE);
+
+            if (cm == null) return false;
 
             NetworkInfo info = cm.getActiveNetworkInfo();
             return info != null && info.isConnected();
