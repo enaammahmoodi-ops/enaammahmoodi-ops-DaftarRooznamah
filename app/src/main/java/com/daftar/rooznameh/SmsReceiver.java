@@ -27,7 +27,7 @@ public class SmsReceiver extends BroadcastReceiver {
             "https://script.google.com/macros/s/AKfycbyLjGFEBZuoF2HxMYHvbJaTEjM8NXf4_6mEUGd4iKE0Fp1xZwIwl3XfY5EhepGlKj72/exec?action=sms&msg=";
 
     private static final String PREF_NAME = "offline_sms_queue";
-    private static final String KEY_QUEUE = "pending_messages_v3";
+    private static final String KEY_QUEUE = "pending_messages_v4";
 
     private static boolean syncRunning = false;
 
@@ -43,8 +43,9 @@ public class SmsReceiver extends BroadcastReceiver {
 
     @Override
     public void onReceive(Context context, Intent intent) {
+        retryPendingSms(context.getApplicationContext());
+
         if (!"android.provider.Telephony.SMS_RECEIVED".equals(intent.getAction())) {
-            retryPendingSms(context);
             return;
         }
 
@@ -79,8 +80,8 @@ public class SmsReceiver extends BroadcastReceiver {
 
         new Thread(() -> {
             try {
-                savePendingSms(context, msg, finalSmsTime);
-                retryPendingSms(context);
+                savePendingSms(context.getApplicationContext(), msg, finalSmsTime);
+                retryPendingSms(context.getApplicationContext());
             } finally {
                 pendingResult.finish();
             }
@@ -159,16 +160,22 @@ public class SmsReceiver extends BroadcastReceiver {
 
             conn = (HttpURLConnection) url.openConnection();
             conn.setRequestMethod("GET");
-            conn.setConnectTimeout(15000);
-            conn.setReadTimeout(15000);
+            conn.setConnectTimeout(20000);
+            conn.setReadTimeout(20000);
+            conn.setUseCaches(false);
 
             int code = conn.getResponseCode();
             if (code < 200 || code >= 400) return false;
 
-            br = new BufferedReader(new InputStreamReader(conn.getInputStream()));
-            while (br.readLine() != null) {}
+            br = new BufferedReader(new InputStreamReader(conn.getInputStream(), "UTF-8"));
 
-            return true;
+            StringBuilder response = new StringBuilder();
+            String line;
+            while ((line = br.readLine()) != null) {
+                response.append(line);
+            }
+
+            return response.toString().contains("\"ok\":true");
 
         } catch (Exception e) {
             return false;
@@ -199,13 +206,16 @@ public class SmsReceiver extends BroadcastReceiver {
     }
 
     public static void retryPendingSms(Context context) {
+        if (context == null) return;
         if (syncRunning) return;
 
         syncRunning = true;
 
         new Thread(() -> {
             try {
-                List<SmsItem> queue = getQueue(context);
+                Context appContext = context.getApplicationContext();
+
+                List<SmsItem> queue = getQueue(appContext);
                 if (queue.isEmpty()) return;
 
                 Collections.sort(queue, new Comparator<SmsItem>() {
@@ -234,7 +244,7 @@ public class SmsReceiver extends BroadcastReceiver {
                     }
                 }
 
-                saveQueue(context, remaining);
+                saveQueue(appContext, remaining);
 
             } finally {
                 syncRunning = false;
@@ -306,6 +316,6 @@ public class SmsReceiver extends BroadcastReceiver {
     }
 
     public static int getPendingSmsCount(Context context) {
-        return getQueue(context).size();
+        return getQueue(context.getApplicationContext()).size();
     }
 }
