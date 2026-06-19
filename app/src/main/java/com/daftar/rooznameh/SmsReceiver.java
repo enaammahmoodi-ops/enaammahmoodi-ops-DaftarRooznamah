@@ -27,7 +27,7 @@ public class SmsReceiver extends BroadcastReceiver {
             "https://script.google.com/macros/s/AKfycbyLjGFEBZuoF2HxMYHvbJaTEjM8NXf4_6mEUGd4iKE0Fp1xZwIwl3XfY5EhepGlKj72/exec?action=sms&msg=";
 
     private static final String PREF_NAME = "offline_sms_queue";
-    private static final String KEY_QUEUE = "pending_messages_v4";
+    private static final String KEY_QUEUE = "pending_messages_v5";
 
     private static boolean syncRunning = false;
 
@@ -134,10 +134,6 @@ public class SmsReceiver extends BroadcastReceiver {
                 .trim();
     }
 
-    private static String messageKey(String msg) {
-        return normalize(msg);
-    }
-
     private static boolean sendNow(String msg) {
         HttpURLConnection conn = null;
         BufferedReader br = null;
@@ -181,15 +177,12 @@ public class SmsReceiver extends BroadcastReceiver {
         if (msg == null || msg.trim().length() == 0) return;
 
         List<SmsItem> queue = getQueue(context);
-        String key = messageKey(msg);
 
-        for (SmsItem item : queue) {
-            if (item != null && item.msg != null && messageKey(item.msg).equals(key)) {
-                return;
-            }
-        }
-
+        // مهم: اینجا دیگر تکراری را رد نمی‌کنیم
+        // همه پیامک‌ها ذخیره و ارسال می‌شوند
+        // فقط Code.gs تصمیم می‌گیرد تکراری است یا نه
         queue.add(new SmsItem(time, msg));
+
         saveQueue(context, queue);
     }
 
@@ -257,19 +250,8 @@ public class SmsReceiver extends BroadcastReceiver {
                 long time = obj.optLong("time", System.currentTimeMillis());
 
                 if (msg != null && msg.trim().length() > 0) {
-                    String key = messageKey(msg);
-                    boolean exists = false;
-
-                    for (SmsItem old : list) {
-                        if (old != null && old.msg != null && messageKey(old.msg).equals(key)) {
-                            exists = true;
-                            break;
-                        }
-                    }
-
-                    if (!exists) {
-                        list.add(new SmsItem(time, msg));
-                    }
+                    // مهم: اینجا هم تکراری حذف نمی‌شود
+                    list.add(new SmsItem(time, msg));
                 }
             }
 
@@ -281,15 +263,9 @@ public class SmsReceiver extends BroadcastReceiver {
     private static void saveQueue(Context context, List<SmsItem> queue) {
         try {
             JSONArray arr = new JSONArray();
-            List<String> keys = new ArrayList<>();
 
             for (SmsItem item : queue) {
                 if (item != null && item.msg != null && item.msg.trim().length() > 0) {
-                    String key = messageKey(item.msg);
-
-                    if (keys.contains(key)) continue;
-                    keys.add(key);
-
                     JSONObject obj = new JSONObject();
                     obj.put("time", item.time);
                     obj.put("msg", item.msg);
