@@ -21,6 +21,7 @@ public class NetworkReceiver extends BroadcastReceiver {
     private void runSync(Context context, long delay) {
         new Handler(Looper.getMainLooper()).postDelayed(() -> {
             if (isOnline(context)) {
+                SmsReceiver.scanInboxBankSms(context.getApplicationContext(), 80);
                 SmsReceiver.retryPendingSms(context.getApplicationContext());
             }
         }, delay);
