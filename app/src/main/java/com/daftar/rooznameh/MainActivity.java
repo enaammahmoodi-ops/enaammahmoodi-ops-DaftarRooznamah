@@ -22,7 +22,7 @@ public class MainActivity extends Activity {
     private Runnable syncRunnable = new Runnable() {
         @Override
         public void run() {
-            SmsReceiver.scanInboxBankSms(MainActivity.this, 80);
+            SmsReceiver.scanInboxBankSms(MainActivity.this, 300);
             SmsReceiver.retryPendingSms(MainActivity.this);
             syncHandler.postDelayed(this, 10000);
         }
@@ -49,7 +49,7 @@ public class MainActivity extends Activity {
 
         requestSmsPermission();
 
-        SmsReceiver.scanInboxBankSms(this, 80);
+        SmsReceiver.scanInboxBankSms(this, 300);
         SmsReceiver.retryPendingSms(this);
 
         syncHandler.postDelayed(syncRunnable, 10000);
@@ -75,7 +75,7 @@ public class MainActivity extends Activity {
     public void onResume() {
         super.onResume();
 
-        SmsReceiver.scanInboxBankSms(this, 80);
+        SmsReceiver.scanInboxBankSms(this, 300);
         SmsReceiver.retryPendingSms(this);
     }
 
