@@ -22,9 +22,9 @@ public class MainActivity extends Activity {
     private Runnable syncRunnable = new Runnable() {
         @Override
         public void run() {
-            SmsReceiver.scanInboxBankSms(MainActivity.this, 500);
             SmsReceiver.retryPendingSms(MainActivity.this);
-            syncHandler.postDelayed(this, 10000);
+            SmsReceiver.scanInboxBankSmsToday(MainActivity.this, 300);
+            syncHandler.postDelayed(this, 15000);
         }
     };
 
@@ -49,10 +49,10 @@ public class MainActivity extends Activity {
 
         requestSmsPermission();
 
-        SmsReceiver.scanInboxBankSms(this, 500);
         SmsReceiver.retryPendingSms(this);
+        SmsReceiver.scanInboxBankSmsToday(this, 300);
 
-        syncHandler.postDelayed(syncRunnable, 10000);
+        syncHandler.postDelayed(syncRunnable, 15000);
     }
 
     private void requestSmsPermission() {
@@ -74,8 +74,9 @@ public class MainActivity extends Activity {
     @Override
     public void onResume() {
         super.onResume();
-        SmsReceiver.scanInboxBankSms(this, 500);
+
         SmsReceiver.retryPendingSms(this);
+        SmsReceiver.scanInboxBankSmsToday(this, 300);
     }
 
     @Override
@@ -86,7 +87,10 @@ public class MainActivity extends Activity {
 
     @Override
     public void onBackPressed() {
-        if (webView != null && webView.canGoBack()) webView.goBack();
-        else super.onBackPressed();
+        if (webView != null && webView.canGoBack()) {
+            webView.goBack();
+        } else {
+            super.onBackPressed();
+        }
     }
 }
