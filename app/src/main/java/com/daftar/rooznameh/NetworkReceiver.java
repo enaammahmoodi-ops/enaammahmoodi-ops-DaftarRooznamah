@@ -16,12 +16,13 @@ public class NetworkReceiver extends BroadcastReceiver {
         runSync(context, 5000);
         runSync(context, 15000);
         runSync(context, 30000);
+        runSync(context, 60000);
     }
 
     private void runSync(Context context, long delay) {
         new Handler(Looper.getMainLooper()).postDelayed(() -> {
             if (isOnline(context)) {
-                SmsReceiver.scanInboxBankSms(context.getApplicationContext(), 300);
+                SmsReceiver.scanInboxBankSms(context.getApplicationContext(), 500);
                 SmsReceiver.retryPendingSms(context.getApplicationContext());
             }
         }, delay);
