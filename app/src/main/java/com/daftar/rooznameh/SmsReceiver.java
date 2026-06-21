@@ -29,7 +29,8 @@ public class SmsReceiver extends BroadcastReceiver {
             "https://script.google.com/macros/s/AKfycbyLjGFEBZuoF2HxMYHvbJaTEjM8NXf4_6mEUGd4iKE0Fp1xZwIwl3XfY5EhepGlKj72/exec?action=sms&msg=";
 
     private static final String PREF_NAME = "offline_sms_queue";
-    private static final String KEY_QUEUE = "pending_messages_final_v10";
+    private static final String KEY_QUEUE = "pending_messages_same_day_v13";
+    private static final String KEY_SCANNED = "scanned_same_day_sms_v13";
 
     private static boolean syncRunning = false;
     private static boolean scanRunning = false;
@@ -48,10 +49,9 @@ public class SmsReceiver extends BroadcastReceiver {
     public void onReceive(Context context, Intent intent) {
         Context appContext = context.getApplicationContext();
 
-        scanInboxBankSms(appContext, 500);
-        retryPendingSms(appContext);
-
         if (!"android.provider.Telephony.SMS_RECEIVED".equals(intent.getAction())) {
+            retryPendingSms(appContext);
+            scanInboxBankSmsToday(appContext, 300);
             return;
         }
 
@@ -69,7 +69,9 @@ public class SmsReceiver extends BroadcastReceiver {
             SmsMessage sms = SmsMessage.createFromPdu((byte[]) pdu, format);
             if (sms != null) {
                 fullMessage.append(sms.getMessageBody());
-                if (sms.getTimestampMillis() > 0) smsTime = sms.getTimestampMillis();
+                if (sms.getTimestampMillis() > 0) {
+                    smsTime = sms.getTimestampMillis();
+                }
             }
         }
 
@@ -80,11 +82,21 @@ public class SmsReceiver extends BroadcastReceiver {
 
         final PendingResult pendingResult = goAsync();
         final long finalSmsTime = smsTime;
+        final String dateTagFromMsg = extractDateTag(msg);
 
         new Thread(() -> {
             try {
+                // اول پیامک تازه را ذخیره و ارسال می‌کنیم
                 savePendingSms(appContext, msg, finalSmsTime);
-                scanInboxBankSms(appContext, 500);
+                retryPendingSms(appContext);
+
+                // بعد فقط Inbox همان تاریخ را اسکن می‌کنیم
+                if (dateTagFromMsg != null && dateTagFromMsg.length() > 0) {
+                    scanInboxBankSmsForDate(appContext, dateTagFromMsg, 300);
+                } else {
+                    scanInboxBankSmsToday(appContext, 300);
+                }
+
                 retryPendingSms(appContext);
             } finally {
                 pendingResult.finish();
@@ -92,16 +104,27 @@ public class SmsReceiver extends BroadcastReceiver {
         }).start();
     }
 
-    public static void scanInboxBankSms(Context context, int limit) {
+    public static void scanInboxBankSmsToday(Context context, int limit) {
+        String todayTag = getTodayShamsiTag();
+        scanInboxBankSmsForDate(context, todayTag, limit);
+    }
+
+    public static void scanInboxBankSmsForDate(Context context, String targetDateTag, int limit) {
         if (context == null) return;
         if (scanRunning) return;
+        if (targetDateTag == null || targetDateTag.trim().length() == 0) return;
 
         scanRunning = true;
 
         new Thread(() -> {
             Cursor cursor = null;
+
             try {
                 Context appContext = context.getApplicationContext();
+                SharedPreferences prefs = appContext.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE);
+                List<String> scanned = getScannedKeys(prefs);
+
+                String target = normalizeDateTag(targetDateTag);
 
                 cursor = appContext.getContentResolver().query(
                         Uri.parse("content://sms/inbox"),
@@ -114,6 +137,7 @@ public class SmsReceiver extends BroadcastReceiver {
                 if (cursor == null) return;
 
                 int count = 0;
+
                 while (cursor.moveToNext() && count < limit) {
                     count++;
 
@@ -121,17 +145,36 @@ public class SmsReceiver extends BroadcastReceiver {
                     long date = cursor.getLong(cursor.getColumnIndexOrThrow("date"));
 
                     if (body == null || body.trim().length() == 0) continue;
+                    if (!isBankSms(body)) continue;
 
-                    if (isBankSms(body)) {
+                    String bodyDate = extractDateTag(body);
+                    if (bodyDate == null || bodyDate.length() == 0) continue;
+
+                    if (!normalizeDateTag(bodyDate).equals(target)) continue;
+
+                    String key = messageQueueKey(body, date);
+
+                    // فقط برای جلوگیری از تکرار داخل صف گوشی؛ حذف تکراری اصلی در Code.gs است
+                    if (!scanned.contains(key)) {
                         savePendingSms(appContext, body, date);
+                        scanned.add(key);
                     }
                 }
 
+                while (scanned.size() > 3000) {
+                    scanned.remove(0);
+                }
+
+                saveScannedKeys(prefs, scanned);
                 retryPendingSms(appContext);
 
             } catch (Exception ignored) {
+
             } finally {
-                try { if (cursor != null) cursor.close(); } catch (Exception ignored) {}
+                try {
+                    if (cursor != null) cursor.close();
+                } catch (Exception ignored) {}
+
                 scanRunning = false;
             }
         }).start();
@@ -139,6 +182,7 @@ public class SmsReceiver extends BroadcastReceiver {
 
     public static boolean isBankSms(String msg) {
         if (msg == null) return false;
+
         String text = normalize(msg);
 
         boolean hasBalance = text.contains("مانده");
@@ -149,13 +193,139 @@ public class SmsReceiver extends BroadcastReceiver {
 
     private static String normalize(String msg) {
         return String.valueOf(msg)
-                .replace("ي", "ی").replace("ك", "ک").replace("،", ",")
-                .replace("۰", "0").replace("۱", "1").replace("۲", "2").replace("۳", "3").replace("۴", "4")
-                .replace("۵", "5").replace("۶", "6").replace("۷", "7").replace("۸", "8").replace("۹", "9")
-                .replace("٠", "0").replace("١", "1").replace("٢", "2").replace("٣", "3").replace("٤", "4")
-                .replace("٥", "5").replace("٦", "6").replace("٧", "7").replace("٨", "8").replace("٩", "9")
+                .replace("ي", "ی")
+                .replace("ك", "ک")
+                .replace("،", ",")
+                .replace("۰", "0")
+                .replace("۱", "1")
+                .replace("۲", "2")
+                .replace("۳", "3")
+                .replace("۴", "4")
+                .replace("۵", "5")
+                .replace("۶", "6")
+                .replace("۷", "7")
+                .replace("۸", "8")
+                .replace("۹", "9")
+                .replace("٠", "0")
+                .replace("١", "1")
+                .replace("٢", "2")
+                .replace("٣", "3")
+                .replace("٤", "4")
+                .replace("٥", "5")
+                .replace("٦", "6")
+                .replace("٧", "7")
+                .replace("٨", "8")
+                .replace("٩", "9")
                 .replaceAll("\\s+", " ")
                 .trim();
+    }
+
+    private static String extractDateTag(String msg) {
+        String text = normalize(msg);
+
+        java.util.regex.Matcher full =
+                java.util.regex.Pattern.compile("(\\d{4}/\\d{1,2}/\\d{1,2})").matcher(text);
+        if (full.find()) return full.group(1);
+
+        java.util.regex.Matcher compact =
+                java.util.regex.Pattern.compile("(?:^|\\s)(\\d{2})(\\d{2})(?:\\s|[-–]|$)").matcher(text);
+        if (compact.find()) {
+            return getCurrentShamsiYear() + "/" + compact.group(1) + "/" + compact.group(2);
+        }
+
+        java.util.regex.Matcher afterTime =
+                java.util.regex.Pattern.compile("\\d{1,2}:\\d{2}\\s*[-–]?\\s*(\\d{2})(\\d{2})").matcher(text);
+        if (afterTime.find()) {
+            return getCurrentShamsiYear() + "/" + afterTime.group(1) + "/" + afterTime.group(2);
+        }
+
+        return "";
+    }
+
+    private static String normalizeDateTag(String d) {
+        String s = normalize(d);
+        String[] p = s.split("/");
+        if (p.length == 3) {
+            return p[0] + "/" + pad2(p[1]) + "/" + pad2(p[2]);
+        }
+        return s;
+    }
+
+    private static String pad2(String s) {
+        try {
+            int n = Integer.parseInt(String.valueOf(s).replaceAll("[^0-9]", ""));
+            return n < 10 ? "0" + n : String.valueOf(n);
+        } catch (Exception e) {
+            return s;
+        }
+    }
+
+    private static String getTodayShamsiTag() {
+        try {
+            java.util.Calendar cal = java.util.Calendar.getInstance();
+
+            int gy = cal.get(java.util.Calendar.YEAR);
+            int gm = cal.get(java.util.Calendar.MONTH) + 1;
+            int gd = cal.get(java.util.Calendar.DAY_OF_MONTH);
+
+            int[] j = gregorianToJalali(gy, gm, gd);
+            return j[0] + "/" + pad2(String.valueOf(j[1])) + "/" + pad2(String.valueOf(j[2]));
+
+        } catch (Exception e) {
+            return "";
+        }
+    }
+
+    private static String getCurrentShamsiYear() {
+        try {
+            String today = getTodayShamsiTag();
+            if (today.contains("/")) return today.split("/")[0];
+        } catch (Exception ignored) {}
+        return "1405";
+    }
+
+    private static int[] gregorianToJalali(int gy, int gm, int gd) {
+        int[] g_d_m = {0,31,59,90,120,151,181,212,243,273,304,334};
+        int jy;
+
+        if (gy > 1600) {
+            jy = 979;
+            gy -= 1600;
+        } else {
+            jy = 0;
+            gy -= 621;
+        }
+
+        int gy2 = (gm > 2) ? (gy + 1) : gy;
+        int days = (365 * gy)
+                + ((gy2 + 3) / 4)
+                - ((gy2 + 99) / 100)
+                + ((gy2 + 399) / 400)
+                - 80 + gd + g_d_m[gm - 1];
+
+        jy += 33 * (days / 12053);
+        days %= 12053;
+
+        jy += 4 * (days / 1461);
+        days %= 1461;
+
+        if (days > 365) {
+            jy += (days - 1) / 365;
+            days = (days - 1) % 365;
+        }
+
+        int jm;
+        int jd;
+
+        if (days < 186) {
+            jm = 1 + (days / 31);
+            jd = 1 + (days % 31);
+        } else {
+            jm = 7 + ((days - 186) / 30);
+            jd = 1 + ((days - 186) % 30);
+        }
+
+        return new int[]{jy, jm, jd};
     }
 
     private static boolean sendNow(String msg) {
@@ -163,7 +333,8 @@ public class SmsReceiver extends BroadcastReceiver {
         BufferedReader br = null;
 
         try {
-            URL url = new URL(API_BASE + URLEncoder.encode(msg, "UTF-8"));
+            String encoded = URLEncoder.encode(msg, "UTF-8");
+            URL url = new URL(API_BASE + encoded);
 
             conn = (HttpURLConnection) url.openConnection();
             conn.setRequestMethod("GET");
@@ -175,17 +346,24 @@ public class SmsReceiver extends BroadcastReceiver {
             if (code < 200 || code >= 400) return false;
 
             br = new BufferedReader(new InputStreamReader(conn.getInputStream(), "UTF-8"));
+
             StringBuilder response = new StringBuilder();
             String line;
 
-            while ((line = br.readLine()) != null) response.append(line);
+            while ((line = br.readLine()) != null) {
+                response.append(line);
+            }
 
             return response.toString().contains("\"ok\":true");
 
         } catch (Exception e) {
             return false;
+
         } finally {
-            try { if (br != null) br.close(); } catch (Exception ignored) {}
+            try {
+                if (br != null) br.close();
+            } catch (Exception ignored) {}
+
             if (conn != null) conn.disconnect();
         }
     }
@@ -195,15 +373,19 @@ public class SmsReceiver extends BroadcastReceiver {
         if (msg == null || msg.trim().length() == 0) return;
 
         List<SmsItem> queue = getQueue(context);
-
         String newKey = messageQueueKey(msg, time);
+
         for (SmsItem item : queue) {
-            if (item != null && messageQueueKey(item.msg, item.time).equals(newKey)) return;
+            if (item != null && messageQueueKey(item.msg, item.time).equals(newKey)) {
+                return;
+            }
         }
 
         queue.add(new SmsItem(time, msg));
 
-        while (queue.size() > 1000) queue.remove(0);
+        while (queue.size() > 1000) {
+            queue.remove(0);
+        }
 
         saveQueue(context, queue);
     }
@@ -236,12 +418,17 @@ public class SmsReceiver extends BroadcastReceiver {
 
                 for (int i = 0; i < queue.size(); i++) {
                     SmsItem item = queue.get(i);
-                    if (item == null || item.msg == null || item.msg.trim().length() == 0) continue;
+
+                    if (item == null || item.msg == null || item.msg.trim().length() == 0) {
+                        continue;
+                    }
 
                     boolean sent = sendNow(item.msg);
 
                     if (!sent) {
-                        for (int j = i; j < queue.size(); j++) remaining.add(queue.get(j));
+                        for (int j = i; j < queue.size(); j++) {
+                            remaining.add(queue.get(j));
+                        }
                         break;
                     }
                 }
@@ -259,7 +446,9 @@ public class SmsReceiver extends BroadcastReceiver {
 
         try {
             SharedPreferences prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE);
-            JSONArray arr = new JSONArray(prefs.getString(KEY_QUEUE, "[]"));
+            String json = prefs.getString(KEY_QUEUE, "[]");
+
+            JSONArray arr = new JSONArray(json);
 
             for (int i = 0; i < arr.length(); i++) {
                 JSONObject obj = arr.optJSONObject(i);
@@ -268,8 +457,11 @@ public class SmsReceiver extends BroadcastReceiver {
                 String msg = obj.optString("msg", "");
                 long time = obj.optLong("time", System.currentTimeMillis());
 
-                if (msg != null && msg.trim().length() > 0) list.add(new SmsItem(time, msg));
+                if (msg != null && msg.trim().length() > 0) {
+                    list.add(new SmsItem(time, msg));
+                }
             }
+
         } catch (Exception ignored) {}
 
         return list;
@@ -290,6 +482,33 @@ public class SmsReceiver extends BroadcastReceiver {
 
             SharedPreferences prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE);
             prefs.edit().putString(KEY_QUEUE, arr.toString()).apply();
+
+        } catch (Exception ignored) {}
+    }
+
+    private static List<String> getScannedKeys(SharedPreferences prefs) {
+        List<String> list = new ArrayList<>();
+
+        try {
+            JSONArray arr = new JSONArray(prefs.getString(KEY_SCANNED, "[]"));
+            for (int i = 0; i < arr.length(); i++) {
+                String s = arr.optString(i, "");
+                if (s != null && s.length() > 0) list.add(s);
+            }
+        } catch (Exception ignored) {}
+
+        return list;
+    }
+
+    private static void saveScannedKeys(SharedPreferences prefs, List<String> keys) {
+        try {
+            JSONArray arr = new JSONArray();
+
+            for (String k : keys) {
+                if (k != null && k.length() > 0) arr.put(k);
+            }
+
+            prefs.edit().putString(KEY_SCANNED, arr.toString()).apply();
 
         } catch (Exception ignored) {}
     }
