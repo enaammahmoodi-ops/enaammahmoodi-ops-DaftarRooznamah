@@ -4,7 +4,7 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.net.ConnectivityManager;
-import android.net.Network;
+import android.net.NetworkInfo;
 
 public class NetworkReceiver extends BroadcastReceiver {
 
@@ -19,24 +19,17 @@ public class NetworkReceiver extends BroadcastReceiver {
 
             if (cm == null) return;
 
-            boolean isOnline = false;
+            NetworkInfo info = cm.getActiveNetworkInfo();
 
-            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
-                Network network = cm.getActiveNetwork();
-                isOnline = network != null;
-            } else {
-                android.net.NetworkInfo info = cm.getActiveNetworkInfo();
-                isOnline = info != null && info.isConnected();
-            }
+            if (info != null && info.isConnected()) {
 
-            if (isOnline) {
                 Context app = context.getApplicationContext();
 
-                SmsReceiver.scanInboxBankSmsToday(app, 300);
+                // فقط این یکی صدا زده شود (سازگار با همه نسخه‌ها)
                 SmsReceiver.retryPendingSms(app);
+
             }
 
-        } catch (Exception ignored) {
-        }
+        } catch (Exception ignored) {}
     }
 }
