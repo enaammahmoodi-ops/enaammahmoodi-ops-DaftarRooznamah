@@ -29,8 +29,7 @@ public class SmsReceiver extends BroadcastReceiver {
             "https://script.google.com/macros/s/AKfycbyLjGFEBZuoF2HxMYHvbJaTEjM8NXf4_6mEUGd4iKE0Fp1xZwIwl3XfY5EhepGlKj72/exec?action=sms&msg=";
 
     private static final String PREF_NAME = "offline_sms_queue";
-    private static final String KEY_QUEUE = "pending_messages_v7";
-    private static final String KEY_SCANNED = "scanned_inbox_ids_v2";
+    private static final String KEY_QUEUE = "pending_messages_final_v10";
 
     private static boolean syncRunning = false;
     private static boolean scanRunning = false;
@@ -49,8 +48,8 @@ public class SmsReceiver extends BroadcastReceiver {
     public void onReceive(Context context, Intent intent) {
         Context appContext = context.getApplicationContext();
 
+        scanInboxBankSms(appContext, 500);
         retryPendingSms(appContext);
-        scanInboxBankSms(appContext, 80);
 
         if (!"android.provider.Telephony.SMS_RECEIVED".equals(intent.getAction())) {
             return;
@@ -70,14 +69,11 @@ public class SmsReceiver extends BroadcastReceiver {
             SmsMessage sms = SmsMessage.createFromPdu((byte[]) pdu, format);
             if (sms != null) {
                 fullMessage.append(sms.getMessageBody());
-                if (sms.getTimestampMillis() > 0) {
-                    smsTime = sms.getTimestampMillis();
-                }
+                if (sms.getTimestampMillis() > 0) smsTime = sms.getTimestampMillis();
             }
         }
 
         String msg = fullMessage.toString();
-
         if (!isBankSms(msg)) return;
 
         Toast.makeText(context, "پیامک بانکی ذخیره شد", Toast.LENGTH_LONG).show();
@@ -88,6 +84,7 @@ public class SmsReceiver extends BroadcastReceiver {
         new Thread(() -> {
             try {
                 savePendingSms(appContext, msg, finalSmsTime);
+                scanInboxBankSms(appContext, 500);
                 retryPendingSms(appContext);
             } finally {
                 pendingResult.finish();
@@ -103,23 +100,12 @@ public class SmsReceiver extends BroadcastReceiver {
 
         new Thread(() -> {
             Cursor cursor = null;
-
             try {
                 Context appContext = context.getApplicationContext();
-                SharedPreferences prefs = appContext.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE);
-
-                JSONArray scannedArr = new JSONArray(prefs.getString(KEY_SCANNED, "[]"));
-                List<String> scannedIds = new ArrayList<>();
-
-                for (int i = 0; i < scannedArr.length(); i++) {
-                    scannedIds.add(scannedArr.optString(i, ""));
-                }
-
-                Uri uri = Uri.parse("content://sms/inbox");
 
                 cursor = appContext.getContentResolver().query(
-                        uri,
-                        new String[]{"_id", "body", "date"},
+                        Uri.parse("content://sms/inbox"),
+                        new String[]{"body", "date"},
                         null,
                         null,
                         "date DESC"
@@ -128,47 +114,24 @@ public class SmsReceiver extends BroadcastReceiver {
                 if (cursor == null) return;
 
                 int count = 0;
-
                 while (cursor.moveToNext() && count < limit) {
                     count++;
 
-                    String id = cursor.getString(cursor.getColumnIndexOrThrow("_id"));
                     String body = cursor.getString(cursor.getColumnIndexOrThrow("body"));
                     long date = cursor.getLong(cursor.getColumnIndexOrThrow("date"));
 
-                    if (id == null || body == null) continue;
-
-                    if (scannedIds.contains(id)) continue;
+                    if (body == null || body.trim().length() == 0) continue;
 
                     if (isBankSms(body)) {
                         savePendingSms(appContext, body, date);
                     }
-
-                    scannedIds.add(id);
                 }
-
-                while (scannedIds.size() > 300) {
-                    scannedIds.remove(0);
-                }
-
-                JSONArray newArr = new JSONArray();
-                for (String id : scannedIds) {
-                    if (id != null && id.length() > 0) {
-                        newArr.put(id);
-                    }
-                }
-
-                prefs.edit().putString(KEY_SCANNED, newArr.toString()).apply();
 
                 retryPendingSms(appContext);
 
             } catch (Exception ignored) {
-
             } finally {
-                try {
-                    if (cursor != null) cursor.close();
-                } catch (Exception ignored) {}
-
+                try { if (cursor != null) cursor.close(); } catch (Exception ignored) {}
                 scanRunning = false;
             }
         }).start();
@@ -176,43 +139,21 @@ public class SmsReceiver extends BroadcastReceiver {
 
     public static boolean isBankSms(String msg) {
         if (msg == null) return false;
-
         String text = normalize(msg);
 
         boolean hasBalance = text.contains("مانده");
-
-        boolean hasAccountOrCard =
-                text.contains("حساب") ||
-                text.contains("کارت");
+        boolean hasAccountOrCard = text.contains("حساب") || text.contains("کارت");
 
         return hasBalance && hasAccountOrCard;
     }
 
     private static String normalize(String msg) {
         return String.valueOf(msg)
-                .replace("ي", "ی")
-                .replace("ك", "ک")
-                .replace("،", ",")
-                .replace("۰", "0")
-                .replace("۱", "1")
-                .replace("۲", "2")
-                .replace("۳", "3")
-                .replace("۴", "4")
-                .replace("۵", "5")
-                .replace("۶", "6")
-                .replace("۷", "7")
-                .replace("۸", "8")
-                .replace("۹", "9")
-                .replace("٠", "0")
-                .replace("١", "1")
-                .replace("٢", "2")
-                .replace("٣", "3")
-                .replace("٤", "4")
-                .replace("٥", "5")
-                .replace("٦", "6")
-                .replace("٧", "7")
-                .replace("٨", "8")
-                .replace("٩", "9")
+                .replace("ي", "ی").replace("ك", "ک").replace("،", ",")
+                .replace("۰", "0").replace("۱", "1").replace("۲", "2").replace("۳", "3").replace("۴", "4")
+                .replace("۵", "5").replace("۶", "6").replace("۷", "7").replace("۸", "8").replace("۹", "9")
+                .replace("٠", "0").replace("١", "1").replace("٢", "2").replace("٣", "3").replace("٤", "4")
+                .replace("٥", "5").replace("٦", "6").replace("٧", "7").replace("٨", "8").replace("٩", "9")
                 .replaceAll("\\s+", " ")
                 .trim();
     }
@@ -222,47 +163,53 @@ public class SmsReceiver extends BroadcastReceiver {
         BufferedReader br = null;
 
         try {
-            String encoded = URLEncoder.encode(msg, "UTF-8");
-            URL url = new URL(API_BASE + encoded);
+            URL url = new URL(API_BASE + URLEncoder.encode(msg, "UTF-8"));
 
             conn = (HttpURLConnection) url.openConnection();
             conn.setRequestMethod("GET");
-            conn.setConnectTimeout(25000);
-            conn.setReadTimeout(25000);
+            conn.setConnectTimeout(30000);
+            conn.setReadTimeout(30000);
             conn.setUseCaches(false);
 
             int code = conn.getResponseCode();
             if (code < 200 || code >= 400) return false;
 
             br = new BufferedReader(new InputStreamReader(conn.getInputStream(), "UTF-8"));
-
             StringBuilder response = new StringBuilder();
             String line;
 
-            while ((line = br.readLine()) != null) {
-                response.append(line);
-            }
+            while ((line = br.readLine()) != null) response.append(line);
 
             return response.toString().contains("\"ok\":true");
 
         } catch (Exception e) {
             return false;
-
         } finally {
-            try {
-                if (br != null) br.close();
-            } catch (Exception ignored) {}
-
+            try { if (br != null) br.close(); } catch (Exception ignored) {}
             if (conn != null) conn.disconnect();
         }
     }
 
     private static synchronized void savePendingSms(Context context, String msg, long time) {
+        if (context == null) return;
         if (msg == null || msg.trim().length() == 0) return;
 
         List<SmsItem> queue = getQueue(context);
+
+        String newKey = messageQueueKey(msg, time);
+        for (SmsItem item : queue) {
+            if (item != null && messageQueueKey(item.msg, item.time).equals(newKey)) return;
+        }
+
         queue.add(new SmsItem(time, msg));
+
+        while (queue.size() > 1000) queue.remove(0);
+
         saveQueue(context, queue);
+    }
+
+    private static String messageQueueKey(String msg, long time) {
+        return normalize(msg) + "|" + time;
     }
 
     public static void retryPendingSms(Context context) {
@@ -289,17 +236,12 @@ public class SmsReceiver extends BroadcastReceiver {
 
                 for (int i = 0; i < queue.size(); i++) {
                     SmsItem item = queue.get(i);
-
-                    if (item == null || item.msg == null || item.msg.trim().length() == 0) {
-                        continue;
-                    }
+                    if (item == null || item.msg == null || item.msg.trim().length() == 0) continue;
 
                     boolean sent = sendNow(item.msg);
 
                     if (!sent) {
-                        for (int j = i; j < queue.size(); j++) {
-                            remaining.add(queue.get(j));
-                        }
+                        for (int j = i; j < queue.size(); j++) remaining.add(queue.get(j));
                         break;
                     }
                 }
@@ -317,9 +259,7 @@ public class SmsReceiver extends BroadcastReceiver {
 
         try {
             SharedPreferences prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE);
-            String json = prefs.getString(KEY_QUEUE, "[]");
-
-            JSONArray arr = new JSONArray(json);
+            JSONArray arr = new JSONArray(prefs.getString(KEY_QUEUE, "[]"));
 
             for (int i = 0; i < arr.length(); i++) {
                 JSONObject obj = arr.optJSONObject(i);
@@ -328,11 +268,8 @@ public class SmsReceiver extends BroadcastReceiver {
                 String msg = obj.optString("msg", "");
                 long time = obj.optLong("time", System.currentTimeMillis());
 
-                if (msg != null && msg.trim().length() > 0) {
-                    list.add(new SmsItem(time, msg));
-                }
+                if (msg != null && msg.trim().length() > 0) list.add(new SmsItem(time, msg));
             }
-
         } catch (Exception ignored) {}
 
         return list;
