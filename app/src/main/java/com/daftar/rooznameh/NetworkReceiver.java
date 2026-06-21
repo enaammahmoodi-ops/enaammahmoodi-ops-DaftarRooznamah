@@ -4,7 +4,7 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.net.ConnectivityManager;
-import android.net.NetworkInfo;
+import android.net.Network;
 
 public class NetworkReceiver extends BroadcastReceiver {
 
@@ -19,13 +19,15 @@ public class NetworkReceiver extends BroadcastReceiver {
 
             if (cm == null) return;
 
-            NetworkInfo info = cm.getActiveNetworkInfo();
+            boolean online = false;
 
-            if (info != null && info.isConnected()) {
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+                Network network = cm.getActiveNetwork();
+                online = network != null;
+            }
 
-                Context app = context.getApplicationContext();
-
-                SmsReceiver.retryPendingSms(app);
+            if (online) {
+                SmsReceiver.retryPendingSms(context.getApplicationContext());
             }
 
         } catch (Exception ignored) {}
