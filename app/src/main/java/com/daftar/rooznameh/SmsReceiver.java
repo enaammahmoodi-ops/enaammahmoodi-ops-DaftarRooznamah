@@ -29,8 +29,8 @@ public class SmsReceiver extends BroadcastReceiver {
             "https://script.google.com/macros/s/AKfycbyLjGFEBZuoF2HxMYHvbJaTEjM8NXf4_6mEUGd4iKE0Fp1xZwIwl3XfY5EhepGlKj72/exec?action=sms&msg=";
 
     private static final String PREF_NAME = "offline_sms_queue";
-    private static final String KEY_QUEUE = "pending_messages_v6";
-    private static final String KEY_SCANNED = "scanned_inbox_ids_v1";
+    private static final String KEY_QUEUE = "pending_messages_v7";
+    private static final String KEY_SCANNED = "scanned_inbox_ids_v2";
 
     private static boolean syncRunning = false;
     private static boolean scanRunning = false;
