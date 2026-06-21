@@ -25,9 +25,7 @@ public class NetworkReceiver extends BroadcastReceiver {
 
                 Context app = context.getApplicationContext();
 
-                // فقط این یکی صدا زده شود (سازگار با همه نسخه‌ها)
                 SmsReceiver.retryPendingSms(app);
-
             }
 
         } catch (Exception ignored) {}
