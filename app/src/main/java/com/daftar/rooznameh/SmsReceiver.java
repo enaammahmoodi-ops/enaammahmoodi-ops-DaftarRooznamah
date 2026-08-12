@@ -62,8 +62,21 @@ public class SmsReceiver extends BroadcastReceiver {
         long start = c.getTimeInMillis(), end = start + 86400000L; Cursor cursor = null;
         try {
             cursor = context.getContentResolver().query(Uri.parse("content://sms/inbox"), new String[]{"body","address","date"}, "date >= ? AND date < ?", new String[]{String.valueOf(start),String.valueOf(end)}, "date DESC");
-            if (cursor == null) return; int n=0, bi=cursor.getColumnIndexOrThrow("body"), ai=cursor.getColumnIndexOrThrow("address"), di=cursor.getColumnIndexOrThrow("date");
-            while (cursor.moveToNext() && n++ < limit) { String body=cursor.getString(bi); if (body != null && body.contains("مانده")) add(context,body.trim(),cursor.getString(ai),cursor.getLong(di)); }
+            if (cursor == null) return;
+            int bankSmsCount = 0;
+            int bi = cursor.getColumnIndexOrThrow("body");
+            int ai = cursor.getColumnIndexOrThrow("address");
+            int di = cursor.getColumnIndexOrThrow("date");
+
+            // limit فقط برای پیامک‌های هدف است، نه همهٔ پیامک‌های صندوق ورودی.
+            // بنابراین پیامک‌های شخصی یا تبلیغاتی باعث متوقف شدن اسکن نمی‌شوند.
+            while (cursor.moveToNext() && bankSmsCount < limit) {
+                String body = cursor.getString(bi);
+                if (body != null && body.contains("مانده")) {
+                    add(context, body.trim(), cursor.getString(ai), cursor.getLong(di));
+                    bankSmsCount++;
+                }
+            }
         } catch (Exception e) { Log.e("SmsReceiver","Scan error",e); } finally { if (cursor != null) cursor.close(); }
     }
 
