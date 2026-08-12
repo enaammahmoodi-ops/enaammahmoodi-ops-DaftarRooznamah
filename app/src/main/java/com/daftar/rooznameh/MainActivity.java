@@ -4,7 +4,6 @@ import android.Manifest;
 import android.app.Activity;
 import android.content.pm.PackageManager;
 import android.os.Bundle;
-import android.os.Handler;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
@@ -12,21 +11,10 @@ import android.webkit.WebViewClient;
 public class MainActivity extends Activity {
 
     private static final int REQ_SMS = 1001;
-
     private static final String ADMIN_URL =
-            "https://script.google.com/macros/s/AKfycbyLjGFEBZuoF2HxMYHvbJaTEjM8NXf4_6mEUGd4iKE0Fp1xZwIwl3XfY5EhepGlKj72/exec?page=admin";
+            "https://script.google.com/macros/s/AKfycbxsXvURwus4QlQlVzhRed-FRONKB7tDojZCSnj5LJjm9YlGJUt5bLa17KjxjuNkEvme/exec?page=admin";
 
     private WebView webView;
-    private Handler syncHandler = new Handler();
-
-    private Runnable syncRunnable = new Runnable() {
-        @Override
-        public void run() {
-            SmsReceiver.retryPendingSms(MainActivity.this);
-            SmsReceiver.scanInboxBankSmsToday(MainActivity.this, 300);
-            syncHandler.postDelayed(this, 15000);
-        }
-    };
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -48,49 +36,41 @@ public class MainActivity extends Activity {
         webView.loadUrl(ADMIN_URL);
 
         requestSmsPermission();
-
-        SmsReceiver.retryPendingSms(this);
-        SmsReceiver.scanInboxBankSmsToday(this, 300);
-
-        syncHandler.postDelayed(syncRunnable, 15000);
+        syncTodaySms();
     }
 
     private void requestSmsPermission() {
-        if (android.os.Build.VERSION.SDK_INT >= 23) {
-            if (checkSelfPermission(Manifest.permission.RECEIVE_SMS) != PackageManager.PERMISSION_GRANTED ||
-                checkSelfPermission(Manifest.permission.READ_SMS) != PackageManager.PERMISSION_GRANTED) {
+        if (android.os.Build.VERSION.SDK_INT < 23) return;
 
-                requestPermissions(
-                        new String[]{
-                                Manifest.permission.RECEIVE_SMS,
-                                Manifest.permission.READ_SMS
-                        },
-                        REQ_SMS
-                );
-            }
+        if (checkSelfPermission(Manifest.permission.RECEIVE_SMS) != PackageManager.PERMISSION_GRANTED ||
+                checkSelfPermission(Manifest.permission.READ_SMS) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[]{
+                    Manifest.permission.RECEIVE_SMS,
+                    Manifest.permission.READ_SMS
+            }, REQ_SMS);
         }
     }
 
     @Override
-    public void onResume() {
-        super.onResume();
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode == REQ_SMS) syncTodaySms();
+    }
 
-        SmsReceiver.retryPendingSms(this);
-        SmsReceiver.scanInboxBankSmsToday(this, 300);
+    private void syncTodaySms() {
+        // SmsReceiver فقط پیامک‌های دارای «مانده» را اسکن/ارسال می‌کند.
+        SmsReceiver.retryPendingSms(getApplicationContext());
     }
 
     @Override
-    public void onDestroy() {
-        super.onDestroy();
-        syncHandler.removeCallbacks(syncRunnable);
+    protected void onResume() {
+        super.onResume();
+        syncTodaySms();
     }
 
     @Override
     public void onBackPressed() {
-        if (webView != null && webView.canGoBack()) {
-            webView.goBack();
-        } else {
-            super.onBackPressed();
-        }
+        if (webView != null && webView.canGoBack()) webView.goBack();
+        else super.onBackPressed();
     }
 }
