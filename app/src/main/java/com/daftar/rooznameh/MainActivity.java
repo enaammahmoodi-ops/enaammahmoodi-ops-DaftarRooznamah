@@ -2,8 +2,13 @@ package com.daftar.rooznameh;
 
 import android.Manifest;
 import android.app.Activity;
+import android.app.AlertDialog;
+import android.content.ComponentName;
+import android.content.DialogInterface;
+import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.os.Bundle;
+import android.provider.Settings;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
@@ -37,6 +42,7 @@ public class MainActivity extends Activity {
 
         requestSmsPermission();
         syncTodaySms();
+        askForNotificationAccess();
     }
 
     private void requestSmsPermission() {
@@ -60,6 +66,34 @@ public class MainActivity extends Activity {
     private void syncTodaySms() {
         // SmsReceiver فقط پیامک‌های دارای «مانده» را اسکن/ارسال می‌کند.
         SmsReceiver.retryPendingSms(getApplicationContext());
+    }
+
+    /** Notification Listener مجوز عادی ندارد؛ کاربر باید آن را در صفحهٔ سیستم روشن کند. */
+    private void askForNotificationAccess() {
+        if (isNotificationAccessEnabled()) return;
+
+        new AlertDialog.Builder(this)
+                .setTitle("دسترسی اعلان‌های بانکی")
+                .setMessage("برای دریافت اعلان‌های بانکی دارای «مانده»، دسترسی اعلان‌ها را برای این برنامه فعال کنید.")
+                .setPositiveButton("باز کردن تنظیمات", new DialogInterface.OnClickListener() {
+                    @Override public void onClick(DialogInterface dialog, int which) {
+                        try {
+                            startActivity(new Intent("android.settings.ACTION_NOTIFICATION_LISTENER_SETTINGS"));
+                        } catch (Exception error) {
+                            startActivity(new Intent(Settings.ACTION_SETTINGS));
+                        }
+                    }
+                })
+                .setNegativeButton("بعداً", null)
+                .show();
+    }
+
+    private boolean isNotificationAccessEnabled() {
+        String enabled = Settings.Secure.getString(
+                getContentResolver(), "enabled_notification_listeners");
+        if (enabled == null || enabled.length() == 0) return false;
+        String component = new ComponentName(this, BankNotificationListener.class).flattenToString();
+        return enabled.contains(component);
     }
 
     @Override
