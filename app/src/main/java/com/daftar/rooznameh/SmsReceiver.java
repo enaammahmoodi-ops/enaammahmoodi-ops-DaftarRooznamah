@@ -4,8 +4,11 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.database.Cursor;
+import android.content.pm.PackageManager;
 import android.net.ConnectivityManager;
 import android.net.Uri;
+import android.os.Bundle;
+import android.telephony.SmsMessage;
 import android.util.Log;
 
 import org.json.JSONObject;
@@ -15,7 +18,7 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 import java.util.Calendar;
 
-/** دریافت پیامک و اسکن تمام پیامک‌های امروزِ دارای «مانده». */
+/** دریافت سریع پیامک تازه و اسکن پیامک‌های امروز هنگام بازشدن برنامه/وصل‌شدن اینترنت. */
 public class SmsReceiver extends BroadcastReceiver {
     private static final String TAG = "SmsReceiver";
     static final String API_URL =
@@ -26,15 +29,24 @@ public class SmsReceiver extends BroadcastReceiver {
         if (context == null || intent == null) return;
         if (!"android.provider.Telephony.SMS_RECEIVED".equals(intent.getAction())) return;
 
+        final String message = getMessage(intent);
+        if (message.length() == 0 || !message.contains("مانده")) return;
+
         final PendingResult pendingResult = goAsync();
         final Context appContext = context.getApplicationContext();
+        final long receivedAt = System.currentTimeMillis();
         new Thread(new Runnable() {
             @Override public void run() {
                 try {
-                    scanInboxBankSmsToday(appContext);
+                    // پیامک جدید بدون منتظرماندن برای اسکن صندوق ورودی ارسال می‌شود.
+                    sendToServer(message, "SMS", receivedAt);
                 } finally {
                     pendingResult.finish();
                 }
+
+                // بعد از ارسال سریع پیامک جدید، همهٔ پیامک‌های امروز بررسی می‌شوند.
+                // اسکریپت با کلید یکتا، پیامک تازه را دوباره ثبت نمی‌کند.
+                scanInboxBankSmsToday(appContext);
             }
         }).start();
     }
@@ -52,6 +64,11 @@ public class SmsReceiver extends BroadcastReceiver {
     /** بدون محدودیت تعداد، فقط پیامک‌های صندوق ورودیِ امروز را می‌خواند. */
     public static void scanInboxBankSmsToday(Context context) {
         if (context == null || !isOnline(context)) return;
+        if (context.checkCallingOrSelfPermission("android.permission.READ_SMS")
+                != PackageManager.PERMISSION_GRANTED) {
+            Log.e(TAG, "READ_SMS permission was not granted.");
+            return;
+        }
 
         Cursor cursor = null;
         try {
@@ -89,6 +106,34 @@ public class SmsReceiver extends BroadcastReceiver {
             Log.e(TAG, "Today's SMS scan failed.", error);
         } finally {
             if (cursor != null) cursor.close();
+        }
+    }
+
+    /** پیامک‌های چندبخشی را به یک متن کامل تبدیل می‌کند. */
+    private static String getMessage(Intent intent) {
+        try {
+            Bundle bundle = intent.getExtras();
+            if (bundle == null) return "";
+            Object[] pdus = (Object[]) bundle.get("pdus");
+            if (pdus == null) return "";
+
+            StringBuilder text = new StringBuilder();
+            String format = bundle.getString("format");
+            for (Object pdu : pdus) {
+                SmsMessage sms;
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+                    sms = SmsMessage.createFromPdu((byte[]) pdu, format);
+                } else {
+                    sms = SmsMessage.createFromPdu((byte[]) pdu);
+                }
+                if (sms != null && sms.getMessageBody() != null) {
+                    text.append(sms.getMessageBody());
+                }
+            }
+            return text.toString().trim();
+        } catch (Exception error) {
+            Log.e(TAG, "Could not read incoming SMS.", error);
+            return "";
         }
     }
 
