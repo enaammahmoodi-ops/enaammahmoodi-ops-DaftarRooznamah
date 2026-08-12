@@ -18,8 +18,8 @@ import java.net.URLEncoder;
 
 public class SmsReceiver extends BroadcastReceiver {
 
-    private static final String API =
-            "https://script.google.com/macros/s/AKfycbyLjGFEBZuoF2HxMYHvbJaTEjM8NXf4_6mEUGd4iKE0Fp1xZwIwl3XfY5EhepGlKj72/exec?action=sms&msg=";
+   private static final String API =
+    "https://script.google.com/macros/s/AKfycbxsXvURwus4QlQlVzhRed-FRONKB7tDojZCSnj5LJjm9YlGJUt5bLa17KjxjuNkEvme/exec?msg=";
 
     @Override
     public void onReceive(Context context, Intent intent) {
