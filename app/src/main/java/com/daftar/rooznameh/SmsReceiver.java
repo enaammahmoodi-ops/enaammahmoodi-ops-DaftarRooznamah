@@ -30,7 +30,7 @@ public class SmsReceiver extends BroadcastReceiver {
         if (!"android.provider.Telephony.SMS_RECEIVED".equals(intent.getAction())) return;
 
         final String message = getMessage(intent);
-        if (message.length() == 0 || !message.contains("مانده")) return;
+        if (message.length() == 0 || !isBankSms(message)) return;
 
         final PendingResult pendingResult = goAsync();
         final Context appContext = context.getApplicationContext();
@@ -97,7 +97,7 @@ public class SmsReceiver extends BroadcastReceiver {
 
             while (cursor.moveToNext()) {
                 String body = cursor.getString(bodyIndex);
-                if (body == null || !body.contains("مانده")) continue;
+                if (body == null || !isBankSms(body)) continue;
                 sendToServer(body.trim(), cursor.getString(senderIndex), cursor.getLong(dateIndex));
             }
         } catch (SecurityException error) {
@@ -107,6 +107,24 @@ public class SmsReceiver extends BroadcastReceiver {
         } finally {
             if (cursor != null) cursor.close();
         }
+    }
+
+    /** یکسان‌سازی متن برای تشخیص پیامک بانکی؛ فاصله، نیم‌فاصله و تفاوت حروف عربی نادیده گرفته می‌شود. */
+    private static String normalizeForMatch(String value) {
+        if (value == null) return "";
+        return value
+                .replace('‌', ' ')
+                .replace('‍', ' ')
+                .replace(' ', ' ')
+                .replace('ي', 'ی')
+                .replace('ى', 'ی')
+                .replace('ك', 'ک')
+                .replaceAll("[\\s\\p{Z}\\p{Cf}]+", "")
+                .trim();
+    }
+
+    private static boolean isBankSms(String value) {
+        return normalizeForMatch(value).contains("مانده");
     }
 
     /** پیامک‌های چندبخشی را به یک متن کامل تبدیل می‌کند. */
